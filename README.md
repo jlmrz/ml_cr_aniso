@@ -2,6 +2,41 @@
 by Oleg Kalashev, Maxim Pshirkov, Mikhail Zotov
 
 Please cite the following <a href="https://arxiv.org/abs/1912.00625">paper</a>
+
+### Local installation
+Set up a virtual environment using python 3.8.20, e.g. using conda:
+
+<pre><code>conda create -n py38 python=3.8.20
+conda activate py38
+</code></pre>  
+
+Install the package
+<pre><code>pip install .</code></pre>
+
+Download [NNhealpix](https://github.com/ai4cmb/NNhealpix/tree/master) and install it as a package:
+<pre><code>cd _path_to_NNhealpix_root_repo_
+[sudo] python setup.py develop [--user]
+pip install -r requirements.txt
+</code></pre>
+
+Download [CRPropa v.3.2](https://github.com/CRPropa/CRPropa3/tree/3.2) and install along with python3 integration. 
+For conda environment:
+<pre><code>git clone https://github.com/CRPropa/CRPropa3
+cd CRPropa3
+git checkout 3.2
+mkdir build
+cd build
+cmake .. \
+    -DBUILD_PYTHON_BINDINGS=ON \
+    -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+    -DPYTHON_EXECUTABLE=$(which python) \
+    -DPYTHON_INCLUDE_DIR=$(python -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())")
+make
+make install
+</code></pre>
+
+Return to the project root repository.
+
 ## source code and supplemental materials
 
 ### 1. Unpack KKOS spectra files

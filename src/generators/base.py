@@ -18,7 +18,7 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 
 from .exposure import create_exposure, Exposure
-from .utils import f_sampler, load_src_sample   # TODO: must be independent
+from .utils import f_sampler, load_src_sample, source_data
 
 
 class BaseGenerator(ABC):
@@ -62,8 +62,8 @@ class BaseGenerator(ABC):
         else:
             self.add_iso = add_iso
 
-        self.sources = sources
         self.__args = args
+        self.sources = sources if sources is not None else self.__args.source_id.split(',')
         self.exclude_energy = args.exclude_energy
 
         if n_samples is None:
@@ -155,11 +155,16 @@ class BaseGenerator(ABC):
                         logging.warning(f'number of nonzero exposure points is {n_non_zero_points}')
                     points_exposure /= tot_exposure
                     self.point_exposure.append(points_exposure)
+            self.num_sources = len(self.coordinates)
 
-    @staticmethod
-    def _load_iso_flux(data_dir: str) -> tuple[np.ndarray, np.ndarray]:
+    def _load_iso_flux(self, data_dir: str) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Isotropic flux is calculated based on a
+        """
         # TODO: add iso_flux generation
-        iso_path = data_dir + '/iso_flux'
+        distance = min([source_data[s][2] for s in self.sources])
+
+        iso_path = data_dir + '/spec_iso/iso' + distance
         iso_flux = np.loadtxt(iso_path)
         E = iso_flux[:, 0] / 1e18  # EeV
         fE = np.sum(iso_flux[:, 1:], axis=1)/E
@@ -190,18 +195,21 @@ class BaseGenerator(ABC):
             Nsrc, Niso = self.sampler.__next__()
 
         coordinates = None
+        file_idx = 0
 
         if Nsrc > 0:
             if self.source_weights is not None:  # mixture of events from different sources in one sample
                 sampled_src = np.random.choice(len(self.source_weights), Nsrc, p=self.source_weights)
                 counts = zip(*np.unique(sampled_src, return_counts=True))
+                # This mode does not support multisource-classification yet # TODO:
+                #  unique_sources = list(np.unique(sampled_src))
             else:  # samples, containing events from single source
                 f_idx = 0
                 if len(self.coordinates) > 1:
                     f_idx = np.random.randint(0, len(self.coordinates))  # select random file
                 counts = [(f_idx, Nsrc)]
 
-            for file_idx, n_src in counts:
+            for file_idx, n_src in counts:   # iterates over a single pair? # TODO: think why?
                 coordinates = self.coordinates[file_idx]
                 log_energies = coordinates[:, 3] + np.random.randn(len(coordinates)) * self.sigmaLnE
                 idxs = np.where(log_energies > self.logEmin)[0]
@@ -219,6 +227,7 @@ class BaseGenerator(ABC):
                     src_sample = np.random.choice(len(coordinates), n_src, replace=True)
 
                 coordinates = coordinates[src_sample]
+                print(file_idx, self.sources[file_idx])
 
         if Niso > 0:
             if self.exposure is None:
@@ -265,15 +274,19 @@ class BaseGenerator(ABC):
             E = np.exp(coordinates[:, 3])
             coordinates[:, 3] = 1000 / (E * E)  # x,y,z, 1000 * (E/EeV)^-2
 
-        answer = Nsrc / self.Neecr
+        if self.num_sources > 1:
+            answers = np.zeros(self.num_sources)
+            answers[file_idx] = Nsrc / self.Neecr
+        else:
+            answers = Nsrc / self.Neecr
 
         if not self.return_frac:
-            answer = (answer > self.threshold)
+            answers = (answers > self.threshold)
 
         if self.exclude_energy:
             coordinates = coordinates[:, :3]
 
-        return coordinates, answer
+        return coordinates, answers
 
 
 class SampleGeneratorTorch(BaseGenerator, Dataset):

@@ -1,6 +1,6 @@
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, GlobalAvgPool1D, Input, Dropout, BatchNormalization
-
+from typing import Optional, Callable
 from . import edgeconv
 
 def layer_name(prefix):
@@ -8,11 +8,32 @@ def layer_name(prefix):
 
 custom_objects = {"EdgeConv": edgeconv.EdgeConv, "SplitLayer": edgeconv.SplitLayer, "mean": keras.backend.mean}
 
-def create_model(n_points, n_coords=4,  n_features=None, kernel_layers=2*[80], n_conv=2, dense_layers=[], k_neighbors=8,
-                 pretrained='', l2=0.000493, l1=0.000053, dropout_rate=0.13,
-                 normalize=True, activation='relu', output_activation='sigmoid',
-                 loss='binary_crossentropy', metrics='accuracy', lr=0.001, dinamic_conv=True):
-# default values for the parameters above were obtained with optimization for n_points=100
+
+def create_model(
+        n_points: int,  # number of nodes
+        n_coords: int = 4,  # number of coordinates used for distance computation
+        n_features: Optional[int] = None,  # number of features carried by a node
+        n_hypothesis_tests: int = 1,  # number of hypothesis to be tested
+        pretrained: str = '',
+        # Model's architecture:
+        n_conv: int = 2,
+        kernel_layers: list[int] = 2 * [80],
+        dense_layers: list = [],
+        k_neighbors: int = 8,
+        l2: float = 0.000493, l1: float = 0.000053, dropout_rate: float = 0.13,
+        normalize: bool = True,
+        activation: str = 'relu', output_activation: str = 'sigmoid',
+        dynamic_conv: bool = True,
+        # Training parameters:
+        loss: str | Callable = 'binary_crossentropy',
+        metrics: str = 'accuracy',
+        lr: float = 0.001,
+):
+    # TODO: assert incompatible losses & modes
+    if n_hypothesis_tests > 1:
+        assert loss == 'categorical_crossentropy'
+
+    # default values for the parameters above were obtained with optimization for n_points=100
     if n_features is None:
         n_features = n_coords
     assert n_coords <= n_features
@@ -32,7 +53,7 @@ def create_model(n_points, n_coords=4,  n_features=None, kernel_layers=2*[80], n
     else:
         features = Input((n_points, n_features), name=layer_name('dgcnn_in'))
         if n_coords < n_features:
-            points = keras.layers.Lambda(lambda x: x[:,:,:n_coords])(features)
+            points = keras.layers.Lambda(lambda x: x[:, :, :n_coords])(features)
         else:
             points = features
 
@@ -49,7 +70,7 @@ def create_model(n_points, n_coords=4,  n_features=None, kernel_layers=2*[80], n
 
         out = EdgeConv([points, norm_features])
         for i in range(1, n_conv):
-            if dinamic_conv:
+            if dynamic_conv:
                 out = EdgeConv(out)
             else:
                 out = EdgeConv([points, out])
@@ -60,7 +81,10 @@ def create_model(n_points, n_coords=4,  n_features=None, kernel_layers=2*[80], n
                 out = layer_activation()(out)
             if dropout_rate > 0:
                 out = Dropout(dropout_rate, name=layer_name('dropout'))(out)
-        out = Dense(1, activation=output_activation, kernel_regularizer=weight_reg, name=layer_name('dense'))(out)
+
+        out = Dense(n_hypothesis_tests, activation=output_activation,
+                    kernel_regularizer=weight_reg, name=layer_name('dense'))(out)
+
         model = keras.models.Model(features, out)
 
     model.summary()

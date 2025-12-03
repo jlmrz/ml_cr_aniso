@@ -227,7 +227,6 @@ class BaseGenerator(ABC):
                     src_sample = np.random.choice(len(coordinates), n_src, replace=True)
 
                 coordinates = coordinates[src_sample]
-                print(file_idx, self.sources[file_idx])
 
         if Niso > 0:
             if self.exposure is None:

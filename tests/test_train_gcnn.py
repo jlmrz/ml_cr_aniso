@@ -2,6 +2,7 @@ import os
 import time
 import numpy as np
 
+from omegaconf import OmegaConf
 from argparse import Namespace
 from src.models import create_model, get_model_name, custom_objects
 
@@ -54,6 +55,7 @@ def get_default_args() -> Namespace:
 
 
 ARGS: Namespace = get_default_args()
+DATA_PATH: str = '../src/data/'
 
 
 class TestModel:
@@ -62,13 +64,34 @@ class TestModel:
 
         model = create_model(
             ARGS.Neecr, n_features=n_features, pretrained=ARGS.pretrained,
-            dinamic_conv=(not ARGS.disable_dinamic_conv)
+            dynamic_conv=(not ARGS.disable_dinamic_conv)
         )
 
         features = np.random.random((10, ARGS.Neecr, 4)).astype(np.float32)
         answers = np.random.random((10, 1)).astype(np.float32)
 
         assert model.input_shape == (None, ARGS.Neecr, n_features), "Wrong input shape"
+        assert model(features).shape == answers.shape, "Wrong output shape"
+
+    def test_create_model_multiclass(self):
+        """
+        Tests for creating a GCNN model for testing hypothesis for multiple possible sources
+        """
+        n_features = 3 if ARGS.exclude_energy else 4
+        config = OmegaConf.load('../config/main_tests.yaml')
+        config.data.source_id = 'M82,M87'
+
+        model = create_model(
+            config.data.Neecr, n_features=n_features, pretrained=config.model.pretrained,
+            dynamic_conv=(not config.model.disable_dynamic_conv),
+            n_hypothesis_tests=len(config.data.source_id.split(',')),
+            loss='categorical_crossentropy'
+        )
+
+        features = np.random.random((10, config.data.Neecr, 4)).astype(np.float32)
+        answers = np.random.random((10, 2)).astype(np.float32)
+
+        assert model.input_shape == (None, config.data.Neecr, n_features), "Wrong input shape"
         assert model(features).shape == answers.shape, "Wrong output shape"
 
     def test_model_save_and_load(self):
@@ -84,7 +107,7 @@ class TestModel:
 
         model = create_model(
             ARGS.Neecr, n_features=n_features, pretrained=ARGS.pretrained,
-            dinamic_conv=(not ARGS.disable_dinamic_conv)
+            dynamic_conv=(not ARGS.disable_dinamic_conv)
         )
 
         save_path = './tmp_' + get_model_name(ARGS) + '.weights.h5'
@@ -108,14 +131,14 @@ class TestModel:
 
 
 class TestTraining:
-    def test_run_gcnn_training(self):
+    def test_gcnn_training(self):
         """
         Test running the training pipeline on synthetic examples.
         """
         n_features = 3 if ARGS.exclude_energy else 4
 
         model = create_model(ARGS.Neecr, n_features=n_features, pretrained=ARGS.pretrained,
-                             dinamic_conv=(not ARGS.disable_dinamic_conv))
+                             dynamic_conv=(not ARGS.disable_dinamic_conv))
 
         features = np.random.random((10, ARGS.Neecr, 4)).astype(np.float32)
         answers = np.random.random((10, 1)).astype(np.float32)
@@ -132,6 +155,39 @@ class TestTraining:
         tf = time.time()
 
         print(f'Training took {tf - t:.2f} seconds')
+
+    def test_gcnn_training_multiclass(self):
+        """
+        Test running the training pipeline on synthetic examples.
+        """
+        config = OmegaConf.load('../config/main_tests.yaml')
+        config.data.source_id = 'M82,M87'
+        n_features = 3 if config.data.exclude_energy else 4
+
+        model = create_model(
+            config.data.Neecr, n_features=n_features, pretrained=config.model.pretrained,
+            dynamic_conv=(not config.model.disable_dynamic_conv),
+            n_hypothesis_tests=len(config.data.source_id.split(',')),
+            loss='categorical_crossentropy'
+        )
+
+        features = np.random.random((10, config.data.Neecr, 4)).astype(np.float32)
+        answers = np.random.random((10, 2)).astype(np.float32)
+        answers = answers > 0.3
+
+        # Test fit with synthetic data
+        t = time.time()
+        model.fit(
+            features, answers,
+            batch_size=2,
+            epochs=1,
+            validation_split=0.2,
+            verbose=1
+        )
+        tf = time.time()
+
+        print(f'Training took {tf - t:.2f} seconds')
+
 
 
 

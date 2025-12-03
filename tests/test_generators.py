@@ -4,7 +4,7 @@ from os import path
 import numpy as np
 from argparse import Namespace
 from omegaconf import OmegaConf
-from src.generators import SampleGeneratorKeras, SampleGeneratorTorch, BaseGenerator
+from src.generators import SampleGeneratorKeras, SampleGeneratorTorch, BaseGenerator, source_data
 
 DATA_PATH: str = '../src/data/'
 
@@ -74,7 +74,6 @@ class TestableBaseGenerator(BaseGenerator):
         return self.n_samples or 100
 
 
-
 @pytest.mark.skipif(not iso_flux_exists, reason="iso_flux file not found")
 class TestBaseGenerator:
     """Tests for the BaseGenerator class"""
@@ -104,7 +103,7 @@ class TestBaseGenerator:
 
     def test_base_generator_initialization_yaml(self):
         """Test that BaseGenerator can be initialized with parameters from yaml"""
-        config = OmegaConf.load('../config/main.yaml')
+        config = OmegaConf.load('../config/main_tests.yaml')
         config.data['data_dir'] = DATA_PATH
 
         generator = TestableBaseGenerator(
@@ -180,7 +179,6 @@ class TestTorchGenerator:
             assert batch_features.shape[1] == ARGS.Neecr
 
 
-
 @pytest.mark.skipif(not iso_flux_exists, reason="iso_flux file is not found")
 class TestKerasGenerator:
     """Tests for KerasGenerator class (if Keras/TensorFlow is available)"""
@@ -201,7 +199,7 @@ class TestKerasGenerator:
         assert generator.batch_size == 32
 
     @pytest.mark.skipif(not keras_available, reason="Keras not available")
-    def test_keras_generator_getitem_returns_arrays(self):
+    def test_keras_generator_getitem(self):
         """Test that __getitem__ returns numpy arrays"""
         generator = SampleGeneratorKeras(args=ARGS, batch_size=4, return_frac=True)
         batch_features, batch_answers = generator[0]
@@ -225,3 +223,14 @@ class TestKerasGenerator:
         # n_samples=100, batch_size=32 → ceil(100/32)=4 batches
         assert len(generator) == 4
 
+    def test_multi_source_classification(self):
+        config = OmegaConf.load('../config/main_tests.yaml')
+        config.data['data_dir'] = DATA_PATH
+        config.data.source_id = 'M82,M87'
+        generator = SampleGeneratorKeras(args=config.data, batch_size=4, return_frac=False)
+        batch_features, batch_answers = generator[0]
+
+        assert batch_features.shape[0] == 4
+        assert batch_answers.shape[0] == 4
+        assert batch_features.shape[1] == config.data.Neecr
+        assert batch_answers.shape[-1] == len(config.data.source_id.split(','))

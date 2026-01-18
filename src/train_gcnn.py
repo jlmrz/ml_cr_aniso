@@ -2,6 +2,7 @@ import os
 import time
 import hydra
 import matplotlib
+import numpy as np
 
 from os import path, remove
 from pathlib import Path
@@ -48,14 +49,15 @@ def main(args: DictConfig):
         SampleGenerator(args=data_config, deterministic=True, seed=test_seed, n_samples=train_config.n_test_samples)
     ]
 
-    if len(sources) > 1:
+    if len(sources) > 1 and not (args.hypothesis_test == 'multi_source'):
         test_gen += [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                      n_samples=train_config.n_test_samples, sources=[s]) for s in sources]
 
     test_b_gen = [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                   n_samples=train_config.n_test_samples,
                                   mf=mf_config.test_mf)]
-    if len(sources) > 1:
+
+    if len(sources) > 1 and not (args.hypothesis_test == 'multi_source'):
         test_b_gen += [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                        n_samples=train_config.n_test_samples,
                                        sources=[s], mf=mf_config.test_mf) for s in sources]
@@ -87,16 +89,24 @@ def main(args: DictConfig):
 
         frac_log = open(result_path / frac_log_file, mode='wt', buffering=1)
 
-        print('#epoch\tfracs\talpha', file=frac_log)
+        print('#epoch\tfracs\talpha\tsource', file=frac_log)
 
         frac_and_alphas = []
 
         def frac_logging_callback(epoch, logs):
-            f_a = calc_detectable_frac(val_gen, model, train_config)
-            frac_and_alphas.append(f_a)
+            _f, _a = calc_detectable_frac(val_gen, model, train_config)
 
-            print(epoch, f_a[0], f_a[1], file=frac_log)
-            print('Detectable fraction:', f_a[0], '\talpha =', f_a[1])
+            # TODO: how to monitor the progress? This is temporarily done by averaging det_frac across sources
+            fracs = []
+            for source, fr_det in _f.items():
+                fracs.append(fr_det)
+                print(epoch, fr_det, _a, source, file=frac_log)
+                print('Source:', source, '\tDetectable fractions:', fr_det, '\talpha =', _a)
+
+            f_a = np.mean(fracs), _a
+            print('\tSource avg detectable fractions:', fr_det, '\talpha =', _a)
+
+            frac_and_alphas.append(f_a)
 
             if train_config.monitor.startswith('frac'):
                 f_a_sorted = sorted(frac_and_alphas)
@@ -184,14 +194,19 @@ def main(args: DictConfig):
                 # print(args.mf, 'field..')
                 test_frac, test_alpha = calc_detectable_frac(gen, model, train_config)
                 for file in [out, stdout]:
-                    print('frac_' + src_name + '_' + args.data.mf, test_frac, file=file)
-                    print('alpha_' + src_name + '_' + args.data.mf, test_alpha, file=file)
+                    for source, fr_det in test_frac.items():
+                        print('Source:', source, '\tDetectable fractions:', fr_det, '\talpha =', test_alpha)
+                        print('frac_' + source + '_' + args.data.mf, fr_det, file=file)
+                        print('alpha_' + source + '_' + args.data.mf, fr_det, file=file)
+
                 b_gen = [b for b in test_b_gen if b.sources == gen.sources]
                 if len(b_gen) == 1:
                     test_frac, test_alpha = calc_detectable_frac(b_gen[0], model, train_config)
                     for file in [out, stdout]:
-                        print('frac_' + src_name + '_' + mf_config.test_mf, test_frac, file=file)
-                        print('alpha_' + src_name + '_' + mf_config.test_mf, test_alpha, file=file)
+                        for source, fr_det in test_frac.items():
+                            print('Source:', source, '\tDetectable fractions:', fr_det, '\talpha =', test_alpha)
+                            print('frac_' + source + '_' + args.data.mf, fr_det, file=file)
+                            print('alpha_' + source + '_' + args.data.mf, fr_det, file=file)
 
     n_features = 3 if data_config.exclude_energy else 4
     if args.model.use_energy_as_feature and not data_config.exclude_energy:
@@ -199,10 +214,15 @@ def main(args: DictConfig):
     else:
         n_coords = n_features
 
-    model = create_model(args.data.Neecr, n_coords=n_coords, n_features=n_features,
-                         pretrained=args.model.pretrained,
-                         dinamic_conv=(not args.model.disable_dynamic_conv))
+    n_sources = len(args.data.source_id.split(',')) if args.hypothesis_test == 'multi_source' else 1
 
+    model = create_model(
+        args.data.Neecr, n_features=n_features, n_coords=n_coords,
+        pretrained=args.model.pretrained,
+        dynamic_conv=(not args.model.disable_dynamic_conv),
+        n_hypothesis_tests=n_sources,
+        loss='binary_crossentropy'
+    )
     save_name = get_model_name(args)
 
     train_model(

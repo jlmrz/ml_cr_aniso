@@ -49,7 +49,7 @@ def main(args: DictConfig):
         SampleGenerator(args=data_config, deterministic=True, seed=test_seed, n_samples=train_config.n_test_samples)
     ]
 
-    if len(sources) > 1 and not (args.hypothesis_test == 'multi_source'):
+    if len(sources) > 1 and not args.multiple_hypothesis_test:
         test_gen += [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                      n_samples=train_config.n_test_samples, sources=[s]) for s in sources]
 
@@ -57,7 +57,7 @@ def main(args: DictConfig):
                                   n_samples=train_config.n_test_samples,
                                   mf=mf_config.test_mf)]
 
-    if len(sources) > 1 and not (args.hypothesis_test == 'multi_source'):
+    if len(sources) > 1 and not args.multiple_hypothesis_test:
         test_b_gen += [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                        n_samples=train_config.n_test_samples,
                                        sources=[s], mf=mf_config.test_mf) for s in sources]
@@ -214,7 +214,7 @@ def main(args: DictConfig):
     else:
         n_coords = n_features
 
-    n_sources = len(args.data.source_id.split(',')) if args.hypothesis_test == 'multi_source' else 1
+    n_sources = len(args.data.source_id.split(',')) if args.multiple_hypothesis_test else 1
 
     model = create_model(
         args.data.Neecr, n_features=n_features, n_coords=n_coords,

@@ -168,7 +168,7 @@ class TestTraining:
             config.data.Neecr, n_features=n_features, pretrained=config.model.pretrained,
             dynamic_conv=(not config.model.disable_dynamic_conv),
             n_hypothesis_tests=len(config.data.source_id.split(',')),
-            loss='categorical_crossentropy'
+            loss='binary_crossentropy'
         )
 
         features = np.random.random((10, config.data.Neecr, 4)).astype(np.float32)

@@ -156,6 +156,7 @@ class BaseGenerator(ABC):
                     points_exposure /= tot_exposure
                     self.point_exposure.append(points_exposure)
             self.num_sources = len(self.coordinates)
+            assert self.num_sources == len(self.sources)
 
     def _load_iso_flux(self, data_dir: str) -> tuple[np.ndarray, np.ndarray]:
         """

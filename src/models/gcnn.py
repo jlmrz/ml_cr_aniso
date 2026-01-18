@@ -29,10 +29,6 @@ def create_model(
         metrics: str = 'accuracy',
         lr: float = 0.001,
 ):
-    # TODO: assert incompatible losses & modes
-    if n_hypothesis_tests > 1:
-        assert loss == 'categorical_crossentropy'
-
     # default values for the parameters above were obtained with optimization for n_points=100
     if n_features is None:
         n_features = n_coords

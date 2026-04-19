@@ -234,3 +234,16 @@ class TestKerasGenerator:
         assert batch_answers.shape[0] == 4
         assert batch_features.shape[1] == config.data.Neecr
         assert batch_answers.shape[-1] == len(config.data.source_id.split(','))
+
+    def test_multiple_turbulent_gmf_seeds(self):
+        config = OmegaConf.load('../config/main_tests.yaml')
+        config.data['data_dir'] = DATA_PATH
+        config.data.source_id = 'M82'
+        config.data.Emin = 28
+        config.data.Nini = 100000
+        generator = SampleGeneratorKeras(args=config.data, suffix='', batch_size=4, return_frac=False)
+        batch_features, batch_answers = generator[0]
+
+        assert batch_features.shape[0] == 4
+        assert batch_answers.shape[0] == 4
+        assert batch_features.shape[1] == config.data.Neecr

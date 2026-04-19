@@ -5,18 +5,19 @@ routine: gcnn
 cuda: True
 
 exposure: TA
+multiple_hypothesis_test: True
 
 # Parameters for Generator class
 data:
-  source_id: M82                # source (CenA, NGC253, M82, M87 or FornaxA) or comma separated list of sources or "all"
+  source_id: M82,M87  # source (CenA, NGC253, M82, M87 or FornaxA) or comma separated list of sources or "all"
   f_src: -1.0                   # If between 0 and 1, fixed fraction of source events
   f_src_max: 1.0                # Maximum fraction of source events (used when f_src is not specified)
   f_src_min: 0.0                # Minimum fraction of source events (used when f_src is not specified)
-  Neecr: 20                     # Total number of EECRs in each sample
+  Neecr: 200                     # Total number of EECRs in each sample
   Emin: 56                      # Emin in EeV for which the input sample was generated
   Nside: 32                     # healpix grid Nside parameter
-  Nini: 10000                   # size of the initial sample of from-source events
-  batch_size: 4                 # size of training batch
+  Nini: 100000                   # size of the initial sample of from-source events
+  batch_size: 100                 # size of training batch
   source_vicinity_radius: '1'
   exposure: ${exposure}
   exclude_energy: False
@@ -24,11 +25,11 @@ data:
   log_sample: False
   sigmaLnE: 0.2
   EminData: null                # if not specified, uses Emin value, else cuts spectra from src_sample.. file
-  n_samples: 100
+  n_samples: 500
   data_dir: ${directories.base}/data
   mf: ${mf.train_mf}
   threshold: 0.0              # source fraction threshold for binary classification
-
+  turbulence_samples: True
 
 model:
   pretrained: ''
@@ -51,7 +52,7 @@ train:
   beta: 0.05                  # type 2 maximal error
   monitor: frac
   n_samples: 100             # number of samples per training epoch
-  n_validation_samples: 100  # number of samples used for validation after each epoch
+  n_validation_samples: 500  # number of samples used for validation after each epoch
   n_test_samples: 500
   min_version: 0
   plot_learning_curves: False

@@ -38,7 +38,8 @@ class BaseGenerator(ABC):
             add_iso: Optional[bool] = None,
             sampler: Union[str, Generator[tuple[int, int]], int] = "auto",
             batch_size: Optional[int] = None,
-            mf: Optional[str] = None
+            mf: Optional[str] = None,
+            event_labels: bool = False
     ) -> None:
 
         self.point_exposure: list = []
@@ -96,10 +97,14 @@ class BaseGenerator(ABC):
         self.p_iso = fE[idx]
         self.p_iso /= np.sum(self.p_iso)
 
+        self.turbulence_samples = args.turbulence_samples
+
         self._setup(mixture=mixture, suffix=suffix, sources=sources, mf=mf)
 
         self.Nside = args.Nside
         self.threshold = args.threshold
+        self.event_labels = event_labels
+
 
     def _setup(self, mixture:  Union[list, None], suffix: str, sources: list, mf: str):
 
@@ -115,6 +120,12 @@ class BaseGenerator(ABC):
             # 2. Find non-zero lines, i.e., those with Z>0:
 
             for data in data_list:
+                if self.turbulence_samples:
+                    n_turb_samples = data.shape[-1]
+                    turbulence_id = np.random.choice(n_turb_samples, size=1)
+                    # Sample from-source events for particular realization of turbulent GMF
+                    data = data[:, :, turbulence_id].squeeze()
+
                 # Filtering invalid entries
                 data = data[data[:, 5] > 0]
                 if len(data) < self.__args.Neecr:
@@ -228,6 +239,7 @@ class BaseGenerator(ABC):
                     src_sample = np.random.choice(len(coordinates), n_src, replace=True)
 
                 coordinates = coordinates[src_sample]
+                source_labels = np.ones(len(coordinates), dtype=int)
 
         if Niso > 0:
             if self.exposure is None:
@@ -265,6 +277,7 @@ class BaseGenerator(ABC):
             xyz = np.array(c.galactic.cartesian.xyz).transpose()
             x4 = lnE.reshape((-1, 1))
             iso_coordinates = np.hstack((xyz, x4))  #
+            iso_labels = np.zeros(len(iso_coordinates), dtype=int)
 
             if coordinates is None:
                 coordinates = iso_coordinates
@@ -274,9 +287,18 @@ class BaseGenerator(ABC):
             E = np.exp(coordinates[:, 3])
             coordinates[:, 3] = 1000 / (E * E)  # x,y,z, 1000 * (E/EeV)^-2
 
+        event_labels = np.concatenate([
+                    source_labels if Nsrc > 0 else np.array([], dtype=int),
+                    iso_labels if Niso > 0 else np.array([], dtype=int)
+                ])
+
         if self.num_sources > 1:
-            answers = np.zeros(self.num_sources)
-            answers[file_idx] = Nsrc / self.Neecr
+            answers = np.zeros(self.num_sources+1)
+            if Nsrc > 0:
+                answers[file_idx+1] = Nsrc / self.Neecr
+            else:
+                answers[0] = 1  # isotropic map
+
         else:
             answers = Nsrc / self.Neecr
 
@@ -285,6 +307,9 @@ class BaseGenerator(ABC):
 
         if self.exclude_energy:
             coordinates = coordinates[:, :3]
+
+        if self.event_labels:
+            answers = event_labels
 
         return coordinates, answers
 

@@ -26,6 +26,9 @@ import numpy as np
 from pathlib import Path
 from typing import Optional
 
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+
 DATA_PATH = Path('../data/')
 
 R_BINS = np.logspace(np.log10(0.5), np.log10(50), 30)
@@ -252,8 +255,38 @@ def get_interpolated_deflection_map(r: float, rbins: list, maps: list):
     """
     r1, r2 = rbins
     m1, m2 = maps
+
+    lat_ini, lon_ini = m1[:, 0],  m1[:, 1]
+    lat_res1, lon_res1 = m1[:, 2], m1[:, 3]
+    lat_res2, lon_res2 = m2[:, 2], m2[:, 3]
+
+    c1 = SkyCoord(l=lon_res1 * u.deg, b=lat_res1 * u.deg, frame='galactic')
+    c2 = SkyCoord(l=lon_res2 * u.deg, b=lat_res2 * u.deg, frame='galactic')
+
+    v1 = np.array(c1.cartesian.xyz).T  # (N, 3)
+    v2 = np.array(c2.cartesian.xyz).T  # (N, 3)
+
     t = (r - r1) / (r2 - r1)
-    return (1 - t) * m1 + t * m2
+    v = (1 - t) * v1 + t * v2
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+
+    cx = SkyCoord(v[:, 0], v[:, 1], v[:, 2],
+                  unit=(u.one, u.one, u.one),
+                  representation_type='cartesian',
+                  frame='galactic')
+
+    # Recompute deflection as angular separation between init and res
+    c_ini = SkyCoord(l=lon_ini * u.deg, b=lat_ini * u.deg, frame='galactic')
+    sep = c_ini.separation(cx)
+    deflection_deg = sep.deg
+
+    cx = cx.represent_as('spherical')
+    lon_res_deg = cx.lon.deg
+    lat_res_deg = cx.lat.deg
+
+    lon_res_deg = ((lon_res_deg + 180.0) % 360.0) - 180.0
+
+    return np.column_stack([lat_ini, lon_ini, lat_res_deg, lon_res_deg, deflection_deg, m1[:, -1] + m2[:, -1]])
 
 
 def get_neighboring_rbins(r: float) -> tuple[float, float]:
@@ -302,8 +335,5 @@ def get_deflection_map(nucleus_params: dict, _h5file: h5py.File, mf_params: dict
     map2 = _h5file[group2]['deflection_map'][:]
 
     _map = get_interpolated_deflection_map(r, [r1, r2], [map1, map2])
-
-    # TODO: deflection must be recalculated
-    # TODO: is it correct to use linear interpolation for
 
     return _map

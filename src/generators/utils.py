@@ -10,12 +10,13 @@ test_seed = 2 ** 26
 
 source_data = {
     # Name : [source_lon, source_lat, D_src]
-    'M82': [141.4095,40.5670,'3.5'],
-    'CenA': [309.5159,19.4173,'3.5'],
-    'NGC253': [97.3638,-87.9645,'3.5'],
+    'M82': [141.4095, 40.5670, '3.5'],
+    'NGC1068': [172.10401114, -51.93361399, '16.0'],
+    'NGC1052': [182.01946755, -57.92547291, '21.5'],
+    'CenA': [309.5159, 19.4173, '3.5'],
     # 'NGC6946': [95.71873,11.6729,'6.0'],
-    'M87': [283.7777,74.4912, '18.5'],
-    'FornaxA': [240.1627,-56.6898,'20.0']
+    'M87': [283.7777, 74.4912, '18.5'],
+    'FornaxA': [240.1627, -56.6898, '20.0']
 }
 
 
@@ -65,6 +66,11 @@ def load_src_sample(
     if mf is None:
         mf = args.mf
 
+    if args.turbulence_samples:
+        file_extension = 'npz'
+    else:
+        file_extension = 'txt'  # will be deprecated
+
     for source_id in sources:
         if 'src_sample_' in source_id:
             infiles = source_id
@@ -75,14 +81,26 @@ def load_src_sample(
                        + '_N' + str(args.Nini)
                        + '_R' + str(args.source_vicinity_radius)
                        + '_Nside' + str(args.Nside) + suffix
-                       + '.txt.xz')
+                       + '.' + file_extension + '.xz')
             infiles = args.data_dir + '/' + mf + '/sources/' + infiles
+
         files = list(glob.glob(infiles))
         if len(files) == 0:
             raise ValueError(infiles + ' file(s) not found!')
+
         for infile in files:
-            with lzma.open(infile, 'rt') as f:
-                yield np.genfromtxt(f, dtype=float)
+            if args.turbulence_samples: # new format
+                for infile in files:
+                    with lzma.open(infile, 'rb') as f:
+                        with np.load(f) as npz:
+                            if 'data' not in npz:
+                                raise KeyError(f"{infile}: key 'data' not found in npz file")
+
+                            data = npz['data']
+                            yield data
+            else:
+                with lzma.open(infile, 'rt') as f:
+                    yield np.genfromtxt(f, dtype=float)
 
 
 def f_sampler(

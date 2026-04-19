@@ -19,11 +19,12 @@ cline_parser = argparse.ArgumentParser(
 )
 
 add_arg('--source_id', type=str, help='one of ' + ' , '.join(source_data.keys()), default='M82')
-add_arg('--GMF', type=str, help='pt or jf', default='kstt')
+add_arg('--GMF', type=str, help='pt or jf', default='jf')
 add_arg('--Emin', type=str, help='Emin in EeV', default=28)
 add_arg('--Nini', type=int, help='Number of cosmic ray nuclei to form a sample', default=100_000)
 add_arg('--Nside', type=int, help='Nside for output healpix grid', default=32)
 add_arg('--shiftA', type=str, help='A factor to shift and atomic mass by', default='1')
+add_arg('--oldFormat', type=str, help='Save a single turbulent realization in old format', default=False)
 
 gmf_full_names = {
     'jf': 'JF12ST',
@@ -35,7 +36,6 @@ gmf_full_names = {
 
 if __name__ == '__main__':
     args = cline_parser.parse_args()
-
 
     source_id = args.source_id
     GMF = args.GMF
@@ -103,10 +103,7 @@ if __name__ == '__main__':
               'potassium', 'calcium', 'scandium', 'titanium', 'vanadium',
               'chromium', 'manganese', 'iron']
 
-    # A counter of EECRs added to the output file (result)
 
-    # A counter for missing (Z,E) pairs
-    err_no = 0
 
     hdf5_path =  f"../data/{GMF}_Nside{Nside}_deflection_maps.h5"
     with h5py.File(hdf5_path, 'r') as file:
@@ -127,13 +124,17 @@ if __name__ == '__main__':
             print(50 * '-', '\n')
             print(f'{n}/{len(seeds)}. Sampling events for turbulent random seed {seed}')
             print(50 * '-', '\n')
+
+            # A counter of EECRs added to the output file (result)
             k = 0
+            # A counter for missing (Z,E) pairs
+            err_no = 0
 
             for i in range(N_files):
                 nucleus = nuclei[Z[i] - 1]
                 print(f'{nucleus} (Z = {Z[i]}) {E[i]}  EeV,  R = {E[i]/Z[i]:.3f}')
 
-                mf_params = {'model': gmf_full_names[GMF], 'random_seed': 8388608}
+                mf_params = {'model': gmf_full_names[GMF], 'random_seed': seed}
                 if GMF == 'jf':
                     mf_params.update(dict(striated=1, turbulent=1))
 
@@ -203,3 +204,17 @@ if __name__ == '__main__':
              meta=np.array([header], dtype=object))
 
     os.system(f'xz ../data/{GMF}/sources/{outfile}.npz')
+
+    if args.oldFormat:
+        with open('../data/' + gmf_dir + 'sources/' + outfile + '.txt','w') as d:
+            d.write(header)
+            for i in np.arange(Nini):
+                d.write('{:11.5f}{:11.5f}{:11.5f}{:11.5f}{:11.5f}{:4d}{:5d}{:9d}\n'.
+                        format(outdata[i,0,0],outdata[i,1,0],
+                           outdata[i,2,0],outdata[i,3,0],
+                           outdata[i,4,0],int(outdata[i,5,0]),
+                           int(outdata[i,6,0]),int(outdata[i,7,0])))
+
+        os.system('xz ../data/' + gmf_dir + 'sources/' + outfile + '.txt')
+
+    #

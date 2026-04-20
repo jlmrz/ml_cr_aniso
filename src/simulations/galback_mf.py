@@ -14,7 +14,7 @@ from crpropa import (
     PT11Field, KST24Field, UF23Field,
 )
 
-from utils import setup_hdf5_file, find_or_create_group, store_results
+from utils import setup_hdf5_file, find_or_create_group, store_results, find_group
 from utils import R_BINS
 
 
@@ -241,22 +241,25 @@ if __name__ == '__main__':
             A, nucleus = NUCLEUS_MAP[Z]
             nucleus_params = dict(Z=Z, E=E, A=A, nucleus=nucleus)
 
-            start_time = time.perf_counter()
+            with setup_hdf5_file(mf_model=ARGS.mf, Nside=Nside) as h5file:
+                group_name = find_group(h5file, mf_params, nucleus_params)
+
+            if not group_name:
+                start_time = time.perf_counter()
+                print("Running backtracking simulation...")
+                coordinates = run_backtracking(B, nucleus_params=nucleus_params)
+
+            else:
+                print(f"Group {group_name} already exists. Nothing to be done")
+                print('\n\n', 50 * "---", '\n\n')
+                continue
 
             with setup_hdf5_file(mf_model=ARGS.mf, Nside=Nside) as h5file:
                 group_name, is_new = find_or_create_group(h5file, mf_params, nucleus_params)
 
-                if not is_new and not rewrite:
-                    print(f"Group {group_name} already exists. Nothing to be done")
-                    print('\n\n', 50*"---", '\n\n')
-                    continue
-
                 if not is_new and rewrite:
                     print(f"Group {group_name} already exists. Rewriting dataset")
 
-                print("Running backtracking simulation...")
-
-                coordinates = run_backtracking(B, nucleus_params=nucleus_params)
                 print(f"Storing results in {group_name}")
 
                 store_results(

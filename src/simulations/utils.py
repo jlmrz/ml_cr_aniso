@@ -51,7 +51,7 @@ def setup_hdf5_file(mf_model: str, Nside: int) -> h5py.File:
     ----------
     h5py File handle
     """
-    hdf5_path = DATA_PATH / f"{mf_model}_Nside{Nside}_deflection_maps.h5"
+    hdf5_path = DATA_PATH / f"{mf_model}_Nside{Nside}_deflection_maps_Rbins{len(R_BINS)}.h5"
 
     if not hdf5_path.parent.exists():
         hdf5_path.parent.mkdir(parents=True)
@@ -66,7 +66,7 @@ def setup_hdf5_file(mf_model: str, Nside: int) -> h5py.File:
 
 
 def find_h5file(mf_model, Nside):
-    hdf5_path = DATA_PATH / f"{mf_model}_Nside{Nside}_deflection_maps.h5"
+    hdf5_path = DATA_PATH / f"{mf_model}_Nside{Nside}_deflection_maps_Rbins{len(R_BINS)}.h5"
     if not hdf5_path.parent.exists():
         raise ValueError('File ', hdf5_path, ' does not exist.')
     return h5py.File(hdf5_path, 'r')
@@ -93,7 +93,9 @@ def find_group(h5file: h5py.File, mf_params: dict, nucleus_params: dict) -> str:
         if group_name.startswith('group_'):
             if 'param_signature' in h5file[group_name].attrs:
                 if h5file[group_name].attrs['param_signature'] == param_sig:
-                    return group_name
+                    if 'deflection_map' in h5file[group_name].keys():
+                        print(h5file[group_name]['deflection_map'])
+                        return group_name
 
     return ''
 

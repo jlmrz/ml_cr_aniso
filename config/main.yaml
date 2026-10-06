@@ -29,7 +29,8 @@ data:
   data_dir: ${directories.base}/data
   mf: ${mf.train_mf}
   threshold: 0.0              # source fraction threshold for binary classification
-
+  spectrum_scenario: auger_scenario1
+  turbulence_samples: True
 
 model:
   pretrained: ''
@@ -39,9 +40,13 @@ model:
 
 # Magnetic field models
 mf:
-  train_mf: 'jf'        # Magnetic field model used for training (jf | jf_sol | jf_pl | tf | pt)
-  validation_mf: 'jf'   # for validation
-  test_mf: 'jf'         # for testing
+  train_mf: [kstt]        # Magnetic field model used for training (jf | jf_sol | jf_pl | tf | pt)
+  validation_mf: [jf]   # for validation
+  test_mf: [kstt]       # for testing
+
+  train_turbulence_seeds: [12345678, 230938493, 394820393]
+  validation_turbulence_seeds: [87654321]
+  test_turbulence_seeds: [97842539]
 
 train:
   n_epochs: 20

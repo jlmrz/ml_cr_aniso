@@ -1,7 +1,9 @@
 import numpy as np
-
-from typing import Generator, Tuple, Optional
+from pathlib import Path
+from typing import Generator, Tuple, Optional, Sequence
 from argparse import Namespace
+
+import lzma
 
 train_seed = 0
 val_seed = 2 ** 20
@@ -16,7 +18,15 @@ source_data = {
     'CenA': [309.5159, 19.4173, '3.5'],
     # 'NGC6946': [95.71873,11.6729,'6.0'],
     'M87': [283.7777, 74.4912, '18.5'],
-    'FornaxA': [240.1627, -56.6898, '20.0']
+    'FornaxA': [240.1627, -56.6898, '20.0'],
+    'NGC4102':	[138.078537, 63.072269, '18.0'],
+    'NGC3079': [157.809932, 48.359931, '17.0'],
+    'NGC2655': [134.923512, 32.688444, '22.0'],
+    # AUGER SEYFERT
+    'NGC4941': [308.805657, 57.174319, '17.0'],
+    'NGC5643': [321.442860, 15.027954, '17.5'],
+    'CircinusGalaxy': [311.325977, -3.807854, '6.5'],
+
 }
 
 
@@ -27,12 +37,101 @@ def get_source_data(source_id):
         raise ValueError('Unknown source!')
 
 
+def load_turbulence_src_samples(
+        args: Namespace, mfs: Sequence[str],
+        sources: Optional[Sequence[str]] = None,
+        seeds: Optional[Sequence[int | str]] = None,
+        suffix: str = "",
+) -> Generator[tuple[str, str, list[np.ndarray]], None, None]:
+    """
+    Load source samples stored as:
+
+        data/<gmf>/sources/turbulence/<seed>/src_sample_<source>_...txt.xz
+
+    Each yielded item contains all requested sources for one consistent
+    (GMF, turbulent seed) realization.
+
+    Yields
+    ------
+    gmf : str
+    seed : str
+    data_list : list[np.ndarray]
+        One array per source, in the same order as `sources`.
+    """
+    if sources is None:
+        sources = args.source_id.split(",")
+
+    requested_seeds = (
+        None
+        if seeds is None
+        else {str(seed) for seed in seeds}
+    )
+
+    for gmf in mfs:
+        turbulence_root = (
+            Path(args.data_dir)
+            / gmf
+            / "sources"
+            / "turbulence"
+        )
+
+        if not turbulence_root.is_dir():
+            raise ValueError(
+                f"Turbulence directory not found: {turbulence_root}"
+            )
+
+        seed_directories = sorted(
+            path
+            for path in turbulence_root.iterdir()
+            if path.is_dir()
+            and (
+                requested_seeds is None
+                or path.name in requested_seeds
+            )
+        )
+
+        if not seed_directories:
+            raise ValueError(
+                f"No turbulent realizations found in {turbulence_root}"
+            )
+
+        for seed_directory in seed_directories:
+            data_list = []
+
+            for source_id in sources:
+                _, _, distance = get_source_data(source_id)
+
+                filename = (
+                    f"src_sample_{source_id}"
+                    f"_D{distance}"
+                    f"_Emin{args.Emin}"
+                    f"_N{args.Nini}"
+                    f"_R{args.source_vicinity_radius}"
+                    f"_Nside{args.Nside}"
+                    f"{suffix}.txt.xz"
+                )
+
+                infile = seed_directory / args.spectrum_scenario / filename
+
+                if not infile.is_file():
+                    raise ValueError(
+                        "Incomplete turbulent realization: "
+                        f"{infile} not found"
+                    )
+
+                with lzma.open(infile, "rt") as stream:
+                    data_list.append(
+                        np.genfromtxt(stream, dtype=float)
+                    )
+
+            yield gmf, seed_directory.name, data_list
+
 def load_src_sample(
         args: Namespace,
         suffix: str = '',
         sources: Optional[list] = None,
         mf: Optional[str] = None
-) -> Generator[np.ndarray]:
+) -> Generator[np.ndarray, np.ndarray, np.ndarray]:
     """
     Load data from src_sample files and yield numpy arrays
 
@@ -106,7 +205,7 @@ def load_src_sample(
 def f_sampler(
         args: Namespace, n_samples: int = -1,  # if < 0, sample forever
         exclude_iso: bool = False
-    ) -> Generator[Tuple[int, int]]:
+    ) -> Generator[Tuple[int, int], None, None]:
     """
     Generator function that samples source and isotropic counts based on configuration parameters.
 

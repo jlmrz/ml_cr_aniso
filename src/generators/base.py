@@ -7,6 +7,7 @@ from omegaconf import DictConfig
 from sys import stderr
 from abc import ABC, abstractmethod
 from typing import Optional, List, Union, Generator
+from pathlib import Path
 
 import torch
 from torch import Tensor
@@ -18,7 +19,7 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 
 from .exposure import create_exposure, Exposure
-from .utils import f_sampler, load_src_sample, source_data
+from .utils import f_sampler, load_src_sample, source_data, load_turbulence_src_samples
 
 
 class BaseGenerator(ABC):
@@ -38,11 +39,11 @@ class BaseGenerator(ABC):
             add_iso: Optional[bool] = None,
             sampler: Union[str, Generator[tuple[int, int]], int] = "auto",
             batch_size: Optional[int] = None,
-            mf: Optional[str] = None,
+            mfs: Optional[List[str]] = None,
+            turbulence_seeds: Optional[List[int]] = None,
             event_labels: bool = False
     ) -> None:
 
-        self.point_exposure: list = []
         self.exposure: Exposure = create_exposure(args)
         self.n_bins_lgE = 1
 
@@ -88,7 +89,7 @@ class BaseGenerator(ABC):
             self._batch_size = batch_size
 
         self.Neecr = args.Neecr
-        self.coordinates = []  # x,y,z,log(E)
+        # self.coordinates = []  # x,y,z,log(E)
         self.source_weights = None
 
         fE, lnE = self._load_iso_flux(args.data_dir)
@@ -98,39 +99,72 @@ class BaseGenerator(ABC):
         self.p_iso /= np.sum(self.p_iso)
 
         self.turbulence_samples = args.turbulence_samples
-
-        self._setup(mixture=mixture, suffix=suffix, sources=sources, mf=mf)
+        self.turbulence_seeds = turbulence_seeds
+        self.variants = []
+        self.mfs = list(mfs)
+        self._setup(mixture=mixture, suffix=suffix, sources=sources)
 
         self.Nside = args.Nside
         self.threshold = args.threshold
         self.event_labels = event_labels
 
+    def _setup(self, mixture:  Union[list, None], suffix: str, sources: list):
 
-    def _setup(self, mixture:  Union[list, None], suffix: str, sources: list, mf: str):
+        self.num_sources = len(self.sources)
 
-        if mixture is None:
-            mixture = []
+        if self.sampler is None:
+            return
 
-        if self.sampler is not None:  # not isotropy
-            data_list = list(load_src_sample(self.__args, suffix=suffix, sources=sources, mf=mf))
-            if len(mixture) > 0:
-                assert len(mixture) == len(data_list), 'inconsistent mixture fractions'
-                self.source_weights = np.array(mixture) / np.sum(mixture)
+        if mixture:
+            assert len(mixture) == len(self.sources),  'inconsistent mixture fractions'
+            self.source_weights = np.asarray(mixture) / np.sum(mixture)
 
-            # 2. Find non-zero lines, i.e., those with Z>0:
+        if self.turbulence_samples:
+            samples = load_turbulence_src_samples(
+                args=self.__args,
+                sources=self.sources,
+                mfs=self.mfs,
+                seeds=self.turbulence_seeds,
+                suffix=suffix,
+            )
+        else:
+            samples = (
+                (
+                    gmf,
+                    None,
+                    list(load_src_sample(
+                        self.__args,
+                        suffix=suffix,
+                        sources=self.sources,
+                        mf=gmf,
+                    )),
+                )
+                for gmf in self.mfs
+            )
+
+        print('Samples in setup:', samples)
+
+        for gmf, turbulence_seed, data_list in samples:
+            variant_coordinates = []
+            variant_exposure = []
 
             for data in data_list:
-                if self.turbulence_samples:
-                    n_turb_samples = data.shape[-1]
-                    turbulence_id = np.random.choice(n_turb_samples, size=1)
-                    # Sample from-source events for particular realization of turbulent GMF
-                    data = data[:, :, turbulence_id].squeeze()
 
+                # for data in data_list:
+                #     if self.turbulence_samples:
+                #         n_turb_samples = data.shape[-1]
+                #         turbulence_id = np.random.choice(n_turb_samples, size=1)
+                        # Sample from-source events for particular realization of turbulent GMF
+                #         data = data[:, :, turbulence_id].squeeze()
+
+                # 2. Find non-zero lines, i.e., those with Z>0:
+                # data = data[data[:, 5] > 0]
+                # through creation of coordinates and points_exposure.
                 # Filtering invalid entries
                 data = data[data[:, 5] > 0]
+
                 if len(data) < self.__args.Neecr:
                     logging.warning('src_sample data size is less then Neecr')
-                    # this is just warning since we still can sample with replacement
                 if len(data) < self.__args.Neecr//2:
                     assert False, 'src_sample data size is less then Neecr/2'
 
@@ -139,8 +173,8 @@ class BaseGenerator(ABC):
                 energy = data[:, 6]
                 src_cells_file = data[:, 7].astype(np.int32)
                 src_cells_cur_grid = hp.ang2pix(
-                    self.__args.Nside, l_deg, b_deg, lonlat=True
-                )
+                        self.__args.Nside, l_deg, b_deg, lonlat=True
+                    )
                 if np.sum(src_cells_file != src_cells_cur_grid) > 0:
                     logging.warning(f'healpix grid index check failed. Map will be converted to Nside={self.__args.Nside})')
 
@@ -150,7 +184,7 @@ class BaseGenerator(ABC):
                 xyz = np.array(c.galactic.cartesian.xyz).transpose()
                 x4 = np.log(energy).reshape((-1,1))
                 coordinates = np.hstack((xyz, x4))  # x,y,z,(E/EeV)^-2
-                self.coordinates.append(coordinates)
+                variant_coordinates.append(coordinates)
 
                 if self.exposure is not None:
                     # TODO: take into account exposure energy dependence for iso component
@@ -165,22 +199,41 @@ class BaseGenerator(ABC):
                     if n_non_zero_points < self.Neecr:
                         logging.warning(f'number of nonzero exposure points is {n_non_zero_points}')
                     points_exposure /= tot_exposure
-                    self.point_exposure.append(points_exposure)
-            self.num_sources = len(self.coordinates)
-            assert self.num_sources == len(self.sources)
+                    variant_exposure.append(points_exposure)
+
+            self.variants.append((
+                variant_coordinates,
+                variant_exposure,
+            ))
 
     def _load_iso_flux(self, data_dir: str) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Isotropic flux is calculated based on a
-        """
-        # TODO: add iso_flux generation
-        distance = min([source_data[s][2] for s in self.sources])
+        iso_path = (
+                Path(data_dir)
+                / "ISO"
+                / "model_spectra"
+                / self.__args.spectrum_scenario
+                / "iso1.0"
+        )
 
-        iso_path = data_dir + '/spec_iso/iso' + distance
-        iso_flux = np.loadtxt(iso_path)
+        if not iso_path.is_file():
+            raise FileNotFoundError(f"Isotropic spectrum not found: {iso_path}")
+
+        iso_flux = np.atleast_2d(np.loadtxt(iso_path))
+
+        # format of TransportCR code with 74 columns. Nuclear fluxes are columns 11:67.
+        if iso_flux.shape[1] == 74:
+            nuclear_flux = iso_flux[:, 11:67]
+        elif iso_flux.shape[1] == 57:  # KKOS format
+            nuclear_flux = iso_flux[:, 1:]
+        else:
+            raise ValueError(
+                f"{iso_path} has {iso_flux.shape[1]} columns; expected 57 or 74"
+            )
+
         E = iso_flux[:, 0] / 1e18  # EeV
-        fE = np.sum(iso_flux[:, 1:], axis=1)/E
+        fE = np.sum(nuclear_flux, axis=1) / E
         lnE = np.log(E)
+
         return fE, lnE
 
     @property
@@ -210,34 +263,47 @@ class BaseGenerator(ABC):
         file_idx = 0
 
         if Nsrc > 0:
+            coordinates_bank, exposure_bank = self.variants[
+                np.random.randint(len(self.variants))   # choosing random (gmf + random seed) variant
+            ]
             if self.source_weights is not None:  # mixture of events from different sources in one sample
                 sampled_src = np.random.choice(len(self.source_weights), Nsrc, p=self.source_weights)
                 counts = zip(*np.unique(sampled_src, return_counts=True))
                 # This mode does not support multisource-classification yet # TODO:
-                #  unique_sources = list(np.unique(sampled_src))
+                # unique_sources = list(np.unique(sampled_src))
+
             else:  # samples, containing events from single source
                 f_idx = 0
-                if len(self.coordinates) > 1:
-                    f_idx = np.random.randint(0, len(self.coordinates))  # select random file
+                if len(coordinates_bank) > 1:
+                    f_idx = np.random.randint(0, len(coordinates_bank))  # select random file (random source)
                 counts = [(f_idx, Nsrc)]
 
-            for file_idx, n_src in counts:   # iterates over a single pair? # TODO: think why?
-                coordinates = self.coordinates[file_idx]
-                log_energies = coordinates[:, 3] + np.random.randn(len(coordinates)) * self.sigmaLnE
-                idxs = np.where(log_energies > self.logEmin)[0]
+            for file_idx, n_src in counts:
+                base_coordinates = coordinates_bank[file_idx]
+
+                log_energies = (
+                        base_coordinates[:, 3]
+                        + np.random.randn(len(base_coordinates)) * self.sigmaLnE
+                )
+
+                idxs = np.where(log_energies >= self.logEmin)[0]
+
+                coordinates = base_coordinates[idxs].copy()
+                coordinates[:, 3] = log_energies[idxs]
 
                 if len(idxs) < n_src // 2 + 1:
                     assert False, 'too few points to sample from'
 
-                coordinates = coordinates[idxs]
-
-                if self.point_exposure:
-                    p = self.point_exposure[file_idx][idxs]
-                    p = p / np.sum(p)
-                    src_sample = np.random.choice(len(coordinates), n_src, p=p, replace=True)
+                if exposure_bank:
+                    p = exposure_bank[file_idx][idxs]
+                    p /= np.sum(p)
+                    src_sample = np.random.choice(
+                        len(coordinates), n_src, p=p, replace=True
+                    )
                 else:
-                    src_sample = np.random.choice(len(coordinates), n_src, replace=True)
-
+                    src_sample = np.random.choice(
+                        len(coordinates), n_src, replace=True
+                    )
                 coordinates = coordinates[src_sample]
                 source_labels = np.ones(len(coordinates), dtype=int)
 
@@ -284,8 +350,8 @@ class BaseGenerator(ABC):
             else:
                 coordinates = np.concatenate((coordinates, iso_coordinates), axis=0)
 
-            E = np.exp(coordinates[:, 3])
-            coordinates[:, 3] = 1000 / (E * E)  # x,y,z, 1000 * (E/EeV)^-2
+        E = np.exp(coordinates[:, 3])
+        coordinates[:, 3] = 1000 / (E * E)  # x,y,z, 1000 * (E/EeV)^-2
 
         event_labels = np.concatenate([
                     source_labels if Nsrc > 0 else np.array([], dtype=int),

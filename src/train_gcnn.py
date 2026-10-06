@@ -23,7 +23,15 @@ from train import get_loss, plot_learning_curves
 from generators import SampleGeneratorKeras as SampleGenerator
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="main")
+def as_list(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
+@hydra.main(version_base=None, config_path="../config", config_name="main_tests")
 def main(args: DictConfig):
 
     mf_config = args.mf
@@ -40,27 +48,36 @@ def main(args: DictConfig):
 
     train_config.loss = get_loss(train_config.loss)
 
-    train_gen = SampleGenerator(args=data_config, seed=train_seed)
+    train_gen = SampleGenerator(
+        args=data_config, seed=train_seed, mfs=mf_config.train_mf,
+        turbulence_seeds=mf_config.train_turbulence_seeds,
+    )
     val_gen = SampleGenerator(
         args=data_config, deterministic=True, seed=val_seed,
-        n_samples=train_config.n_validation_samples, mf=mf_config.validation_mf
+        n_samples=train_config.n_validation_samples, mfs=mf_config.validation_mf,
+        turbulence_seeds=mf_config.validation_turbulence_seeds,
     )
     test_gen = [
-        SampleGenerator(args=data_config, deterministic=True, seed=test_seed, n_samples=train_config.n_test_samples)
+        SampleGenerator(args=data_config, deterministic=True,
+                        seed=test_seed, n_samples=train_config.n_test_samples,
+                        mfs=mf_config.test_mf, turbulence_seeds=mf_config.test_turbulence_seeds)
     ]
 
     if len(sources) > 1 and not args.multiple_hypothesis_test:
         test_gen += [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
+                                     mfs=mf_config.test_mf, turbulence_seeds=mf_config.test_turbulence_seeds,
                                      n_samples=train_config.n_test_samples, sources=[s]) for s in sources]
 
     test_b_gen = [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                   n_samples=train_config.n_test_samples,
-                                  mf=mf_config.test_mf)]
+                                  mfs=mf_config.test_mf, turbulence_seeds=mf_config.test_turbulence_seeds,)]
 
     if len(sources) > 1 and not args.multiple_hypothesis_test:
         test_b_gen += [SampleGenerator(args=data_config, deterministic=True, seed=test_seed,
                                        n_samples=train_config.n_test_samples,
-                                       sources=[s], mf=mf_config.test_mf) for s in sources]
+                                       sources=[s],
+                                       mfs=mf_config.test_mf, turbulence_seeds=mf_config.test_turbulence_seeds,
+                                       ) for s in sources]
 
     results_dir = Path(os.getcwd()).parent / "results" / datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     print(f"Making results dirs at {results_dir}")
@@ -104,7 +121,7 @@ def main(args: DictConfig):
                 print('Source:', source, '\tDetectable fractions:', fr_det, '\talpha =', _a)
 
             f_a = np.mean(fracs), _a
-            print('\tSource avg detectable fractions:', fr_det, '\talpha =', _a)
+            print('\tSource avg detectable fractions:', f_a[0], '\talpha =', _a)
 
             frac_and_alphas.append(f_a)
 
@@ -175,14 +192,16 @@ def main(args: DictConfig):
                 print(name, sc, file=out)
                 print(name, sc)
 
+            validation_mf_label = "-".join(val_gen.mfs)
+
             print('training_time_sec', t, file=out)
 
             if len(frac_and_alphas) > 0:
                 frac_and_alphas.sort()
                 f, a = frac_and_alphas[0]
                 for file in [out, stdout]:
-                    print('best_val_frac_' + mf_config.validation_mf, f, file=file)
-                    print('best_val_alpha_' + mf_config.validation_mf, a, file=file)
+                    print('best_val_frac_' + validation_mf_label, f, file=file)
+                    print('best_val_alpha_' +validation_mf_label, a, file=file)
 
             for gen in test_gen:
                 sources = gen.sources
@@ -193,11 +212,13 @@ def main(args: DictConfig):
                 print('testing on', src_name,'source')
                 # print(args.mf, 'field..')
                 test_frac, test_alpha = calc_detectable_frac(gen, model, train_config)
+                test_mf_label = "-".join(gen.mfs)
+
                 for file in [out, stdout]:
                     for source, fr_det in test_frac.items():
                         print('Source:', source, '\tDetectable fractions:', fr_det, '\talpha =', test_alpha)
-                        print('frac_' + source + '_' + args.data.mf, fr_det, file=file)
-                        print('alpha_' + source + '_' + args.data.mf, fr_det, file=file)
+                        print('frac_' + source + '_' + test_mf_label, fr_det, file=file)
+                        print('alpha_' + source + '_' + test_mf_label, fr_det, file=file)
 
                 b_gen = [b for b in test_b_gen if b.sources == gen.sources]
                 if len(b_gen) == 1:
@@ -205,8 +226,8 @@ def main(args: DictConfig):
                     for file in [out, stdout]:
                         for source, fr_det in test_frac.items():
                             print('Source:', source, '\tDetectable fractions:', fr_det, '\talpha =', test_alpha)
-                            print('frac_' + source + '_' + args.data.mf, fr_det, file=file)
-                            print('alpha_' + source + '_' + args.data.mf, fr_det, file=file)
+                            print('frac_' + source + '_' + test_mf_label, fr_det, file=file)
+                            print('alpha_' + source + '_' + test_mf_label, fr_det, file=file)
 
     n_features = 3 if data_config.exclude_energy else 4
     if args.model.use_energy_as_feature and not data_config.exclude_energy:
@@ -214,14 +235,15 @@ def main(args: DictConfig):
     else:
         n_coords = n_features
 
-    n_sources = len(args.data.source_id.split(',')) if args.multiple_hypothesis_test else 1
+    n_sources = len(args.data.source_id.split(',')) + 1 if args.multiple_hypothesis_test else 1
 
     model = create_model(
         args.data.Neecr, n_features=n_features, n_coords=n_coords,
         pretrained=args.model.pretrained,
         dynamic_conv=(not args.model.disable_dynamic_conv),
-        n_hypothesis_tests=n_sources,
-        loss='binary_crossentropy'
+        n_hypothesis_tests=n_sources, lr=0.001,
+        loss='categorical_crossentropy' if args.multiple_hypothesis_test else 'binary_crossentropy',
+        output_activation='softmax' if args.multiple_hypothesis_test else 'sigmoid'
     )
     save_name = get_model_name(args)
 

@@ -3,6 +3,7 @@ from argparse import Namespace
 
 
 def get_model_name(args: DictConfig | Namespace) -> str:
+    mf_label = "-".join(args.mf.train_mf)
     if isinstance(args, Namespace):
         if args.pretrained and len(args.output_prefix) == 0:
             return args.pretrained[:-3]
@@ -12,7 +13,7 @@ def get_model_name(args: DictConfig | Namespace) -> str:
             else:
                 prefix = args.exposure + '_'
             prefix += '_'.join(sorted(args.source_id.split(',')))
-            save_name = args.output_prefix + f'{prefix}_N{args.Neecr}_B{args.mf}'
+            save_name = args.output_prefix + f'{prefix}_N{args.Neecr}_B{mf_label}'
             if args.threshold > 0:
                 save_name += '_th' + str(args.threshold)
             save_name += '_sig{:.0f}'.format(100*args.sigmaLnE)
@@ -30,7 +31,7 @@ def get_model_name(args: DictConfig | Namespace) -> str:
             else:
                 prefix = args.data.exposure + '_'
             prefix += '_'.join(sorted(args.data.source_id.split(',')))
-            save_name = args.model.output_prefix + f'{prefix}_N{args.data.Neecr}_B{args.data.mf}'
+            save_name = args.model.output_prefix + f'{prefix}_N{args.data.Neecr}_B{mf_label}'
             if args.data.threshold > 0:
                 save_name += '_th' + str(args.data.threshold)
             save_name += '_sig{:.0f}'.format(100*args.data.sigmaLnE)
